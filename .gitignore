@@ -1,0 +1,5 @@
+/.actionlint-cache/
+*.log
+.DS_Store
+node_modules/
+selftest/spa/dist/
