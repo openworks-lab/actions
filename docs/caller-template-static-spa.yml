@@ -1,0 +1,19 @@
+name: web
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  web:
+    uses: openworks-lab/actions/.github/workflows/static-publish-to-s3.yml@main
+    with:
+      env: prod                               # EDIT dev|prod
+      working-directory: services/web         # EDIT
+      build-command: npm ci && npm run build
+      build-output-dir: dist
+      s3-bucket: openworks-prod-open-echo-web  # EDIT must be openworks-<env>-*
+      publish: ${{ github.event_name != 'pull_request' }}

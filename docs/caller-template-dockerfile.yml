@@ -1,0 +1,21 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api-server]                 # EDIT — ECR repo = <env>-<thisrepo>/<service>
+    uses: openworks-lab/actions/.github/workflows/dockerfile-build-and-push.yml@main
+    with:
+      env: prod                               # EDIT dev|prod
+      service_slug: ${{ matrix.service }}
+      dockerfile: docker/Dockerfile.${{ matrix.service }}   # EDIT
+      push: ${{ github.event_name != 'pull_request' }}
