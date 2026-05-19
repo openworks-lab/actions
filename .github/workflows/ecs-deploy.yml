@@ -1,0 +1,153 @@
+name: ecs-deploy
+
+on:
+  workflow_call:
+    inputs:
+      env:
+        type: string
+        required: true
+      service_slug:
+        description: "Concurrency key + image-prefix check"
+        type: string
+        required: true
+      cluster:
+        type: string
+        required: true
+      service:
+        type: string
+        required: true
+      image:
+        description: "Full image URI from dockerfile-build-and-push.yml"
+        type: string
+        required: true
+      aws-region:
+        type: string
+        default: ap-northeast-2
+      wait-stable:
+        type: boolean
+        default: true
+    outputs:
+      task-definition-arn:
+        value: ${{ jobs.deploy.outputs.task-definition-arn }}
+
+concurrency:
+  group: ecs-${{ inputs.env }}-${{ inputs.service_slug }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    outputs:
+      task-definition-arn: ${{ steps.register.outputs.arn }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate identity + image prefix (M3, M6 — fail-fast)
+        env:
+          ENV: ${{ inputs.env }}
+          SVC: ${{ inputs.service_slug }}
+          IMG: ${{ inputs.image }}
+          REGION: ${{ inputs.aws-region }}
+        run: |
+          set -euo pipefail
+          OWNER="${GITHUB_REPOSITORY%%/*}"; PROJECT="${GITHUB_REPOSITORY#*/}"
+          [ "$OWNER" = "openworks-lab" ] || { echo "::error::owner != openworks-lab"; exit 1; }
+          case "$ENV" in dev|prod) : ;; *) echo "::error::env must be dev|prod"; exit 1 ;; esac
+          RE='^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$'
+          [[ "$PROJECT" =~ $RE && "$SVC" =~ $RE ]] || { echo "::error::slug regex"; exit 1; }
+          PREFIX="211125308791.dkr.ecr.${REGION}.amazonaws.com/${ENV}-${PROJECT}/${SVC}:"
+          case "$IMG" in
+            "${PREFIX}"*) : ;;
+            *) echo "::error::image '$IMG' must start with '$PREFIX' (M6)"; exit 1 ;;
+          esac
+
+      - name: Configure AWS credentials (OIDC, internal role — M1)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::211125308791:role/${{ inputs.env }}-gha-deployer
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Capture base task-def + family check
+        id: base
+        env:
+          CLUSTER: ${{ inputs.cluster }}
+          SERVICE: ${{ inputs.service }}
+          ENV: ${{ inputs.env }}
+        run: |
+          set -euo pipefail
+          BASE_ARN="$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].taskDefinition' --output text)"
+          [ -n "$BASE_ARN" ] && [ "$BASE_ARN" != "None" ] || { echo "::error::service has no task definition"; exit 1; }
+          aws ecs describe-task-definition --task-definition "$BASE_ARN" \
+            --query 'taskDefinition' --output json > /tmp/cur-td.json
+          FAM="$(jq -r '.family' /tmp/cur-td.json)"
+          case "$FAM" in ${ENV}-*) : ;; *) echo "::error::family '$FAM' must start with '${ENV}-'"; exit 1 ;; esac
+          echo "base-arn=$BASE_ARN" >> "$GITHUB_OUTPUT"
+
+      - name: "Guard A — abort if service moved before register (M7)"
+        env:
+          CLUSTER: ${{ inputs.cluster }}
+          SERVICE: ${{ inputs.service }}
+          BASE: ${{ steps.base.outputs.base-arn }}
+        run: |
+          set -euo pipefail
+          NOW="$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].taskDefinition' --output text)"
+          [ "$NOW" = "$BASE" ] || { echo "::error::concurrent deploy detected (task-def moved $BASE → $NOW). Aborting fail-closed; re-run."; exit 1; }
+
+      - name: Build drift-safe revision (composite action — M8)
+        uses: ./.github/actions/ecs-taskdef-transform
+        with:
+          src-json: /tmp/cur-td.json
+          new-image: ${{ inputs.image }}
+          out-json: /tmp/new-td.json
+
+      - name: Register new task definition (as-built ABAC tags)
+        id: register
+        env:
+          ENV: ${{ inputs.env }}
+        run: |
+          set -euo pipefail
+          PROJECT="${GITHUB_REPOSITORY#*/}"
+          ARN="$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/new-td.json \
+            --tags key=Org,value=openworks-lab key=Env,value="$ENV" \
+                   key=Project,value="$PROJECT" key=ManagedBy,value=terraform \
+            --query 'taskDefinition.taskDefinitionArn' --output text)"
+          echo "arn=$ARN" >> "$GITHUB_OUTPUT"
+
+      - name: "Guard B — abort if service moved just before update (M7)"
+        env:
+          CLUSTER: ${{ inputs.cluster }}
+          SERVICE: ${{ inputs.service }}
+          BASE: ${{ steps.base.outputs.base-arn }}
+        run: |
+          set -euo pipefail
+          NOW="$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].taskDefinition' --output text)"
+          [ "$NOW" = "$BASE" ] || { echo "::error::service moved during register window ($BASE → $NOW). Not updating; new revision ${{ steps.register.outputs.arn }} left registered/unused; re-run."; exit 1; }
+
+      - name: Update service
+        env:
+          CLUSTER: ${{ inputs.cluster }}
+          SERVICE: ${{ inputs.service }}
+        # V1.0 known limitation: a ~sub-second TOCTOU window remains between
+        # Guard B and this update-service (cross-tool/Terraform race; not the
+        # same concurrency group). Image deployed is always inputs.image — the
+        # residual risk is overwriting a concurrent Terraform-set revision, not
+        # a wrong-image deploy. Accepted per ADR-0006; deterministic lock = V1.1.
+        run: |
+          set -euo pipefail
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "${{ steps.register.outputs.arn }}" >/dev/null
+
+      - name: Wait for service stable
+        if: ${{ inputs.wait-stable }}
+        env:
+          CLUSTER: ${{ inputs.cluster }}
+          SERVICE: ${{ inputs.service }}
+        run: aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"

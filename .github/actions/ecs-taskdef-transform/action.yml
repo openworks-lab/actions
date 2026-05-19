@@ -1,5 +1,5 @@
 name: ecs-taskdef-transform
-description: "Drift-safe ECS task-def image swap (image-only; single 'app' guard). No caller checkout needed."
+description: "Drift-safe ECS task-def image swap (image-only; single 'app' guard). Composite runs no checkout of its own; the calling reusable job checks out the repo."
 inputs:
   src-json:
     description: "Path to a describe-task-definition JSON file"
