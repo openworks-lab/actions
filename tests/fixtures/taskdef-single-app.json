@@ -1,0 +1,18 @@
+{ "taskDefinition": {
+  "taskDefinitionArn": "arn:aws:ecs:ap-northeast-2:211125308791:task-definition/dev-open-echo-api:7",
+  "containerDefinitions": [ { "name": "app",
+    "image": "211125308791.dkr.ecr.ap-northeast-2.amazonaws.com/dev-open-echo/api:OLDSHA",
+    "essential": true,
+    "environment": [{"name":"LOG_LEVEL","value":"info"}],
+    "secrets": [{"name":"DB_URL","valueFrom":"arn:aws:secretsmanager:ap-northeast-2:211125308791:secret:dev-open-echo-db"}] } ],
+  "family": "dev-open-echo-api",
+  "executionRoleArn": "arn:aws:iam::211125308791:role/dev-open-echo-task-execution",
+  "taskRoleArn": "arn:aws:iam::211125308791:role/dev-open-echo-task",
+  "networkMode": "awsvpc", "cpu": "256", "memory": "512",
+  "requiresCompatibilities": ["FARGATE"],
+  "revision": 7, "status": "ACTIVE",
+  "requiresAttributes": [{"name":"ecs.capability.execution-role-awslogs"}],
+  "compatibilities": ["FARGATE"], "registeredAt": "2026-05-10T00:00:00Z",
+  "registeredBy": "arn:aws:sts::211125308791:assumed-role/dev-gha-deployer/x",
+  "deregisteredAt": "2026-05-11T00:00:00Z",
+  "tags": [{"key":"Env","value":"dev"}] } }

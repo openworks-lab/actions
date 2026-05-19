@@ -1,0 +1,23 @@
+name: ecs-taskdef-transform
+description: "Drift-safe ECS task-def image swap (image-only; single 'app' guard). No caller checkout needed."
+inputs:
+  src-json:
+    description: "Path to a describe-task-definition JSON file"
+    required: true
+  new-image:
+    description: "Full image URI to set on the 'app' container"
+    required: true
+  out-json:
+    description: "Path to write the register-ready task def JSON"
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SRC_JSON: ${{ inputs.src-json }}
+        NEW_IMAGE: ${{ inputs.new-image }}
+        OUT_JSON: ${{ inputs.out-json }}
+      run: |
+        bash "${{ github.action_path }}/transform.sh" "$SRC_JSON" "$NEW_IMAGE" > "$OUT_JSON"
+        test -s "$OUT_JSON"
