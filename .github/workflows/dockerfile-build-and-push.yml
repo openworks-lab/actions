@@ -1,0 +1,112 @@
+name: dockerfile-build-and-push
+
+on:
+  workflow_call:
+    inputs:
+      env:
+        description: "dev|prod — selects deployer role + ECR Env scope"
+        type: string
+        required: true
+      service_slug:
+        description: "Service id, e.g. api-server (ECR repo = <env>-<project>/<service_slug>)"
+        type: string
+        required: true
+      dockerfile:
+        type: string
+        default: Dockerfile
+      context:
+        type: string
+        default: "."
+      build-args:
+        type: string
+        default: ""
+      platforms:
+        type: string
+        default: linux/amd64
+      push:
+        type: boolean
+        default: false
+      aws-region:
+        type: string
+        default: ap-northeast-2
+    outputs:
+      image-uri:
+        value: ${{ jobs.build.outputs.image-uri }}
+      image-digest:
+        description: "Pushed image digest (empty on push:false build-only path)"
+        value: ${{ jobs.build.outputs.image-digest }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image-uri: ${{ steps.id.outputs.image-uri }}
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive + validate identity (acceptance gate, M3)
+        id: id
+        env:
+          ENV: ${{ inputs.env }}
+          SVC: ${{ inputs.service_slug }}
+        run: |
+          set -euo pipefail
+          OWNER="${GITHUB_REPOSITORY%%/*}"
+          PROJECT="${GITHUB_REPOSITORY#*/}"
+          [ "$OWNER" = "openworks-lab" ] || { echo "::error::owner '$OWNER' != openworks-lab"; exit 1; }
+          case "$ENV" in dev|prod) : ;; *) echo "::error::env must be dev|prod"; exit 1 ;; esac
+          RE='^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$'
+          [[ "$PROJECT" =~ $RE ]] || { echo "::error::project slug '$PROJECT' fails $RE"; exit 1; }
+          [[ "$SVC" =~ $RE ]] || { echo "::error::service slug '$SVC' fails $RE"; exit 1; }
+          REPO="${ENV}-${PROJECT}/${SVC}"
+          REG="211125308791.dkr.ecr.${{ inputs.aws-region }}.amazonaws.com"
+          {
+            echo "repo=${REPO}"
+            echo "image-uri=${REG}/${REPO}:main-${GITHUB_SHA}"
+            echo "tags<<EOTAGS"
+            echo "${REG}/${REPO}:main-${GITHUB_SHA}"
+            echo "${REG}/${REPO}:latest"
+            echo "EOTAGS"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (OIDC, internal role — M1)
+        if: ${{ inputs.push }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::211125308791:role/${{ inputs.env }}-gha-deployer
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Amazon ECR login
+        if: ${{ inputs.push }}
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Assert infra-owned ECR repo exists (M4 — fail-close, no create)
+        if: ${{ inputs.push }}
+        env:
+          REPO: ${{ steps.id.outputs.repo }}
+          REGION: ${{ inputs.aws-region }}
+        run: |
+          set -euo pipefail
+          aws ecr describe-repositories --repository-names "$REPO" --region "$REGION" >/dev/null 2>&1 || {
+            echo "::error::ECR repo '$REPO' not found. ECR is infra-owned (V1.0). Create it in the Phase 5 infra precondition before deploying."
+            exit 1; }
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build (push only when credentialed; cache=type=gha — M5)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          platforms: ${{ inputs.platforms }}
+          build-args: ${{ inputs.build-args }}
+          push: ${{ inputs.push }}
+          tags: ${{ steps.id.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
