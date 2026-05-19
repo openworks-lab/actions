@@ -26,3 +26,74 @@ jobs:
       build-output-dir: dist
       s3-bucket: openworks-dev-actions-selftest
       publish: false
+
+  ecs-transform-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tests/transform_test.sh
+
+  workflow-ref-match:
+    name: "trusted job_workflow_ref == actual reusables (M13)"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert exactly the 3 locked reusables exist
+        run: |
+          set -euo pipefail
+          EXPECT="dockerfile-build-and-push.yml static-publish-to-s3.yml ecs-deploy.yml"
+          for f in $EXPECT; do
+            test -f ".github/workflows/$f" || { echo "::error::missing locked reusable $f"; exit 1; }
+          done
+          # No extra workflow_call reusables beyond the 3 (M6 hard-gate parity).
+          # Match the actual `on:`→`workflow_call:` TRIGGER key (2-space indent),
+          # NOT the literal string — this job's own script contains the words
+          # "workflow_call", so a content grep would self-match self-test.yml.
+          EXTRA="$(grep -lE '^  workflow_call:' .github/workflows/*.yml | xargs -n1 basename | grep -vxF -e dockerfile-build-and-push.yml -e static-publish-to-s3.yml -e ecs-deploy.yml || true)"
+          [ -z "$EXTRA" ] || { echo "::error::unexpected extra workflow_call reusable: $EXTRA (breaks gha-deployer job_workflow_ref allowlist)"; exit 1; }
+
+  negative-oidc-deployer-from-actions:
+    name: "NEG: deployer NOT assumable from actions repo OIDC"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Decode own JWT + verify premise (actions repo sub)
+        run: |
+          set -euo pipefail
+          TOKEN="$(curl -fsSL -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)"
+          PAYLOAD="$(echo "$TOKEN" | cut -d. -f2 | tr '_-' '/+' | base64 -d 2>/dev/null || true)"
+          SUB="$(echo "$PAYLOAD" | jq -r .sub)"
+          echo "::notice::sub=$SUB"
+          echo "$SUB" | grep -q '^repo:openworks-lab/actions:' || { echo "::error::premise broken — not actions repo token"; exit 1; }
+      - id: assume
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::211125308791:role/prod-gha-deployer
+          aws-region: ap-northeast-2
+      - name: Assert assume FAILED
+        if: always()
+        run: |
+          case "${{ steps.assume.outcome }}" in
+            failure) echo "OK: STS denied — actions repo id not in product_repo_ids (expected; never added — M11)." ;;
+            success) echo "::error::SECURITY: deployer assumable from actions repo OIDC!"; exit 1 ;;
+            *) echo "::error::INCONCLUSIVE outcome=${{ steps.assume.outcome }}"; exit 1 ;;
+          esac
+
+  selftest-gate:
+    name: selftest-gate
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [build-only-docker, build-only-static, ecs-transform-unit, workflow-ref-match, negative-oidc-deployer-from-actions]
+    steps:
+      - name: Aggregate result (M15 — single stable required context)
+        run: |
+          set -euo pipefail
+          R='${{ needs.build-only-docker.result }} ${{ needs.build-only-static.result }} ${{ needs.ecs-transform-unit.result }} ${{ needs.workflow-ref-match.result }} ${{ needs.negative-oidc-deployer-from-actions.result }}'
+          echo "results: $R"
+          for x in $R; do
+            case "$x" in success|skipped) : ;; *) echo "::error::a self-test job is '$x'"; exit 1 ;; esac
+          done
+          echo "OK: all self-test jobs green/skipped."
