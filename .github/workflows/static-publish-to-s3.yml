@@ -1,0 +1,93 @@
+name: static-publish-to-s3
+
+on:
+  workflow_call:
+    inputs:
+      env:
+        description: "dev|prod — selects deployer role + bucket scope"
+        type: string
+        required: true
+      working-directory:
+        type: string
+        default: "."
+      node-version:
+        type: string
+        default: "20"
+      build-command:
+        type: string
+        default: "npm ci && npm run build"
+      build-output-dir:
+        type: string
+        default: dist
+      s3-bucket:
+        description: "Target bucket — must match openworks-<env>-* (as-built IAM)"
+        type: string
+        required: true
+      s3-prefix:
+        type: string
+        default: ""
+      publish:
+        type: boolean
+        default: false
+    outputs:
+      s3-uri:
+        description: "s3://bucket/prefix synced to (empty on publish:false build-only path)"
+        value: ${{ jobs.publish.outputs.s3-uri }}
+      commit-sha:
+        value: ${{ github.sha }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    outputs:
+      s3-uri: ${{ steps.sync.outputs.s3-uri }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate env + bucket scope (M9 — fail-fast)
+        env:
+          ENV: ${{ inputs.env }}
+          BUCKET: ${{ inputs.s3-bucket }}
+        run: |
+          set -euo pipefail
+          case "$ENV" in dev|prod) : ;; *) echo "::error::env must be dev|prod"; exit 1 ;; esac
+          case "$BUCKET" in
+            openworks-${ENV}-*) : ;;
+            *) echo "::error::s3-bucket '$BUCKET' must match 'openworks-${ENV}-*' (as-built IAM scope)"; exit 1 ;;
+          esac
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Build
+        working-directory: ${{ inputs.working-directory }}
+        # build-command is trusted-caller-only (caller in product_repo_ids,
+        # caller's own workflow file); not exposed to untrusted input.
+        run: ${{ inputs.build-command }}
+
+      - name: Configure AWS credentials (OIDC, internal role — M1)
+        if: ${{ inputs.publish }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::211125308791:role/${{ inputs.env }}-gha-deployer
+          aws-region: ap-northeast-2
+
+      - name: S3 sync
+        id: sync
+        if: ${{ inputs.publish }}
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          BUCKET: ${{ inputs.s3-bucket }}
+          PREFIX: ${{ inputs.s3-prefix }}
+          OUTDIR: ${{ inputs.build-output-dir }}
+        run: |
+          set -euo pipefail
+          DEST="s3://${BUCKET}/${PREFIX}"
+          aws s3 sync "${OUTDIR}/" "${DEST}" --delete
+          echo "s3-uri=${DEST}" >> "$GITHUB_OUTPUT"
+      # NOTE: CloudFront invalidation intentionally NOT in V1.0 (M10, ADR-0006).

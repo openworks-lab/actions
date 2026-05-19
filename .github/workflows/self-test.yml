@@ -16,3 +16,13 @@ jobs:
       dockerfile: selftest/Dockerfile
       context: selftest
       push: false
+
+  build-only-static:
+    uses: ./.github/workflows/static-publish-to-s3.yml
+    with:
+      env: dev
+      working-directory: selftest/spa
+      build-command: npm run build
+      build-output-dir: dist
+      s3-bucket: openworks-dev-actions-selftest
+      publish: false

@@ -1,0 +1,2 @@
+{ "name": "actions-selftest-spa", "private": true, "version": "0.0.0",
+  "scripts": { "build": "mkdir -p dist && cp src/index.js dist/index.js && echo '<!doctype html><script src=index.js></script>' > dist/index.html" } }
