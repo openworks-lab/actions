@@ -64,7 +64,7 @@ jobs:
           [[ "$PROJECT" =~ $RE ]] || { echo "::error::project slug '$PROJECT' fails $RE"; exit 1; }
           [[ "$SVC" =~ $RE ]] || { echo "::error::service slug '$SVC' fails $RE"; exit 1; }
           REPO="${ENV}-${PROJECT}/${SVC}"
-          REG="211125308791.dkr.ecr.${{ inputs.aws-region }}.amazonaws.com"
+          REG="${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ inputs.aws-region }}.amazonaws.com"
           {
             echo "repo=${REPO}"
             echo "image-uri=${REG}/${REPO}:main-${GITHUB_SHA}"
@@ -78,7 +78,7 @@ jobs:
         if: ${{ inputs.push }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::211125308791:role/${{ inputs.env }}-gha-deployer
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/${{ inputs.env }}-gha-deployer
           aws-region: ${{ inputs.aws-region }}
 
       - name: Amazon ECR login
