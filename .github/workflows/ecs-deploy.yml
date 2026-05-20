@@ -59,7 +59,7 @@ jobs:
           case "$ENV" in dev|prod) : ;; *) echo "::error::env must be dev|prod"; exit 1 ;; esac
           RE='^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$'
           [[ "$PROJECT" =~ $RE && "$SVC" =~ $RE ]] || { echo "::error::slug regex"; exit 1; }
-          PREFIX="211125308791.dkr.ecr.${REGION}.amazonaws.com/${ENV}-${PROJECT}/${SVC}:"
+          PREFIX="${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${REGION}.amazonaws.com/${ENV}-${PROJECT}/${SVC}:"
           case "$IMG" in
             "${PREFIX}"*) : ;;
             *) echo "::error::image '$IMG' must start with '$PREFIX' (M6)"; exit 1 ;;
@@ -68,7 +68,7 @@ jobs:
       - name: Configure AWS credentials (OIDC, internal role — M1)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::211125308791:role/${{ inputs.env }}-gha-deployer
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/${{ inputs.env }}-gha-deployer
           aws-region: ${{ inputs.aws-region }}
 
       - name: Capture base task-def + family check

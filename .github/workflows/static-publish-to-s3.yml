@@ -74,7 +74,7 @@ jobs:
         if: ${{ inputs.publish }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::211125308791:role/${{ inputs.env }}-gha-deployer
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/${{ inputs.env }}-gha-deployer
           aws-region: ap-northeast-2
 
       - name: S3 sync
