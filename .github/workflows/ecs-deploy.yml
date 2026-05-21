@@ -100,7 +100,7 @@ jobs:
           [ "$NOW" = "$BASE" ] || { echo "::error::concurrent deploy detected (task-def moved $BASE → $NOW). Aborting fail-closed; re-run."; exit 1; }
 
       - name: Build drift-safe revision (composite action — M8)
-        uses: ./.github/actions/ecs-taskdef-transform
+        uses: openworks-lab/actions/.github/actions/ecs-taskdef-transform@main
         with:
           src-json: /tmp/cur-td.json
           new-image: ${{ inputs.image }}
