@@ -1,0 +1,7 @@
+{ "taskDefinition": {
+  "containerDefinitions": [
+    {"name":"web","image":"old","essential":true},
+    {"name":"logging-sidecar","image":"fluentbit","essential":false} ],
+  "family":"dev-open-echo-api","cpu":"256","memory":"512",
+  "requiresCompatibilities":["FARGATE"],"networkMode":"awsvpc",
+  "revision":3,"status":"ACTIVE" } }

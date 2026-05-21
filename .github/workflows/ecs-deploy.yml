@@ -71,33 +71,51 @@ jobs:
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/${{ inputs.env }}-gha-deployer
           aws-region: ${{ inputs.aws-region }}
 
-      - name: Capture base task-def + family check
+      # P5 V1.1 fix — family latest ACTIVE rev base capture (NOT service.taskDefinition).
+      #
+      # V1.0 시점 capture = describe-services 의 service.taskDefinition. 그러나 terraform
+      # aws_ecs_service.lifecycle.ignore_changes = [task_definition] 가 *service.taskDefinition
+      # 갱신 막음* → terraform 의 새 rev (env_vars 변경 적용) 가 CI capture 에 반영 안 됨
+      # → CI 가 옛 rev base 잡고 image swap → terraform env_vars 변경 영구 deploy 안 됨
+      # (P5 break-fix loop 8건 중 3건의 직접 원인). V1.1 fix = family latest ACTIVE rev base.
+      # terraform 새 register = 자동 deploy.
+      - name: Capture base task-def (family latest ACTIVE)
         id: base
         env:
-          CLUSTER: ${{ inputs.cluster }}
           SERVICE: ${{ inputs.service }}
           ENV: ${{ inputs.env }}
         run: |
           set -euo pipefail
-          BASE_ARN="$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
-            --query 'services[0].taskDefinition' --output text)"
-          [ -n "$BASE_ARN" ] && [ "$BASE_ARN" != "None" ] || { echo "::error::service has no task definition"; exit 1; }
-          aws ecs describe-task-definition --task-definition "$BASE_ARN" \
-            --query 'taskDefinition' --output json > /tmp/cur-td.json
-          FAM="$(jq -r '.family' /tmp/cur-td.json)"
-          case "$FAM" in ${ENV}-*) : ;; *) echo "::error::family '$FAM' must start with '${ENV}-'"; exit 1 ;; esac
-          echo "base-arn=$BASE_ARN" >> "$GITHUB_OUTPUT"
+          # family name = service name (modules/fargate-service local.family = local.name).
+          FAMILY="$SERVICE"
+          case "$FAMILY" in
+            ${ENV}-*) : ;;
+            *) echo "::error::family '$FAMILY' must start with '${ENV}-'"; exit 1 ;;
+          esac
 
-      - name: "Guard A — abort if service moved before register (M7)"
+          # describe-task-definition --task-definition <family> = latest ACTIVE revision.
+          aws ecs describe-task-definition --task-definition "$FAMILY" \
+            --query 'taskDefinition' --output json > /tmp/cur-td.json
+          BASE_ARN="$(jq -r '.taskDefinitionArn' /tmp/cur-td.json)"
+          [ -n "$BASE_ARN" ] && [ "$BASE_ARN" != "null" ] || { echo "::error::family '$FAMILY' has no ACTIVE task definition (terraform apply prerequisite)"; exit 1; }
+          STATUS="$(jq -r '.status' /tmp/cur-td.json)"
+          [ "$STATUS" = "ACTIVE" ] || { echo "::error::latest task def '$BASE_ARN' status='$STATUS' (not ACTIVE)"; exit 1; }
+
+          echo "base-arn=$BASE_ARN" >> "$GITHUB_OUTPUT"
+          echo "family=$FAMILY" >> "$GITHUB_OUTPUT"
+          echo "Captured base: $BASE_ARN (family latest ACTIVE)"
+
+      # Guard A — capture 후 family 에 새 rev 가 등록됐는지 검증 (다른 CI run 또는 terraform 의 race).
+      # 변경 감지 = abort fail-closed + 재시도 (capture 단계 부터 다시 = 그 새 rev base 채택).
+      - name: "Guard A — abort if family latest moved before register"
         env:
-          CLUSTER: ${{ inputs.cluster }}
-          SERVICE: ${{ inputs.service }}
+          FAMILY: ${{ steps.base.outputs.family }}
           BASE: ${{ steps.base.outputs.base-arn }}
         run: |
           set -euo pipefail
-          NOW="$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
-            --query 'services[0].taskDefinition' --output text)"
-          [ "$NOW" = "$BASE" ] || { echo "::error::concurrent deploy detected (task-def moved $BASE → $NOW). Aborting fail-closed; re-run."; exit 1; }
+          NOW="$(aws ecs describe-task-definition --task-definition "$FAMILY" \
+            --query 'taskDefinition.taskDefinitionArn' --output text)"
+          [ "$NOW" = "$BASE" ] || { echo "::error::concurrent register detected (family latest moved $BASE → $NOW). Aborting fail-closed; re-run."; exit 1; }
 
       - name: Build drift-safe revision (composite action — M8)
         uses: openworks-lab/actions/.github/actions/ecs-taskdef-transform@main
@@ -120,16 +138,24 @@ jobs:
             --query 'taskDefinition.taskDefinitionArn' --output text)"
           echo "arn=$ARN" >> "$GITHUB_OUTPUT"
 
-      - name: "Guard B — abort if service moved just before update (M7)"
+      # Guard B — register 직전 family latest 가 BASE 와 일치 검증 (V1.1).
+      # register-task-definition 후 family latest = 우리 새 rev. Guard B 는 *register 전*
+      # family latest 가 *capture 시점 BASE* 와 동일한지 다시 확인 (다른 race 없었는지).
+      # 우리 NEW_ARN 는 *이미 register 됐음* — abort 시 그 rev 는 사용되지 않은 채 family 에 남음.
+      - name: "Guard B — abort if family moved between capture and register"
         env:
-          CLUSTER: ${{ inputs.cluster }}
-          SERVICE: ${{ inputs.service }}
+          FAMILY: ${{ steps.base.outputs.family }}
           BASE: ${{ steps.base.outputs.base-arn }}
+          NEW_ARN: ${{ steps.register.outputs.arn }}
         run: |
           set -euo pipefail
-          NOW="$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
-            --query 'services[0].taskDefinition' --output text)"
-          [ "$NOW" = "$BASE" ] || { echo "::error::service moved during register window ($BASE → $NOW). Not updating; new revision ${{ steps.register.outputs.arn }} left registered/unused; re-run."; exit 1; }
+          # 우리 새 rev 보다 *앞* 의 rev 가 BASE 였는지. NEW_ARN 의 family 안 *직전 rev* = BASE 여야.
+          # describe-task-definition 의 latest 가 NEW_ARN (우리 register 결과). 한 단계 앞 = BASE.
+          # 검증 = NEW_ARN 의 family + revision-1 = BASE 의 revision.
+          NEW_REV="$(echo "$NEW_ARN" | awk -F: '{print $NF}')"
+          BASE_REV="$(echo "$BASE" | awk -F: '{print $NF}')"
+          EXPECTED_BASE_REV=$((NEW_REV - 1))
+          [ "$BASE_REV" = "$EXPECTED_BASE_REV" ] || { echo "::error::race detected — base rev=$BASE_REV, new rev=$NEW_REV (expected base=$EXPECTED_BASE_REV). Other actor registered between capture and register. New rev $NEW_ARN left registered/unused; re-run."; exit 1; }
 
       - name: Update service
         env:
