@@ -46,7 +46,7 @@ jobs:
     outputs:
       s3-uri: ${{ steps.sync.outputs.s3-uri }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Validate env + bucket scope (M9 — fail-fast)
         env:
@@ -60,7 +60,7 @@ jobs:
             *) echo "::error::s3-bucket '$BUCKET' must match 'openworks-${ENV}-*' (as-built IAM scope)"; exit 1 ;;
           esac
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ inputs.node-version }}
 
@@ -72,7 +72,7 @@ jobs:
 
       - name: Configure AWS credentials (OIDC, internal role — M1)
         if: ${{ inputs.publish }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/${{ inputs.env }}-gha-deployer
           aws-region: ap-northeast-2
