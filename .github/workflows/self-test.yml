@@ -30,7 +30,7 @@ jobs:
   ecs-transform-unit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: bash tests/transform_test.sh
 
   workflow-ref-match:
@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Assert exactly the 3 locked reusables exist
         run: |
           set -euo pipefail
@@ -69,7 +69,7 @@ jobs:
           echo "$SUB" | grep -q '^repo:openworks-lab/actions:' || { echo "::error::premise broken — not actions repo token"; exit 1; }
       - id: assume
         continue-on-error: true
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::211125308791:role/prod-gha-deployer
           aws-region: ap-northeast-2

@@ -47,7 +47,7 @@ jobs:
       image-uri: ${{ steps.id.outputs.image-uri }}
       image-digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Derive + validate identity (acceptance gate, M3)
         id: id
@@ -76,7 +76,7 @@ jobs:
 
       - name: Configure AWS credentials (OIDC, internal role — M1)
         if: ${{ inputs.push }}
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/${{ inputs.env }}-gha-deployer
           aws-region: ${{ inputs.aws-region }}
@@ -96,11 +96,11 @@ jobs:
             echo "::error::ECR repo '$REPO' not found. ECR is infra-owned (V1.0). Create it in the Phase 5 infra precondition before deploying."
             exit 1; }
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build (push only when credentialed; cache=type=gha — M5)
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}

@@ -44,7 +44,7 @@ jobs:
     outputs:
       task-definition-arn: ${{ steps.register.outputs.arn }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Validate identity + image prefix (M3, M6 — fail-fast)
         env:
@@ -66,7 +66,7 @@ jobs:
           esac
 
       - name: Configure AWS credentials (OIDC, internal role — M1)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/${{ inputs.env }}-gha-deployer
           aws-region: ${{ inputs.aws-region }}
