@@ -49,7 +49,7 @@ jobs:
               {"Effect":"Allow","Action":"ecr:GetAuthorizationToken","Resource":"*"},
               {"Effect":"Allow",
                "Action":["ecr:BatchCheckLayerAvailability","ecr:GetDownloadUrlForLayer","ecr:BatchGetImage"],
-               "Resource":"arn:aws:ecr:ap-northeast-2:${{ vars.AWS_ACCOUNT_ID }}:repository/prod-developers/*"}]}
+               "Resource":"arn:aws:ecr:ap-northeast-2:${{ vars.AWS_ACCOUNT_ID }}:repository/prod-developer-portal/*"}]}
 
       - name: mint ECR token + SSH deploy
         env:
