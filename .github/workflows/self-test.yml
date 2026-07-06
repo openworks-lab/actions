@@ -39,18 +39,18 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v5
-      - name: Assert exactly the 3 locked reusables exist
+      - name: Assert exactly the 4 locked reusables exist
         run: |
           set -euo pipefail
-          EXPECT="dockerfile-build-and-push.yml static-publish-to-s3.yml ecs-deploy.yml"
+          EXPECT="dockerfile-build-and-push.yml static-publish-to-s3.yml ecs-deploy.yml vultr-deploy.yml"
           for f in $EXPECT; do
             test -f ".github/workflows/$f" || { echo "::error::missing locked reusable $f"; exit 1; }
           done
-          # No extra workflow_call reusables beyond the 3 (M6 hard-gate parity).
+          # No extra workflow_call reusables beyond the 4 (M6 hard-gate parity).
           # Match the actual `on:`→`workflow_call:` TRIGGER key (2-space indent),
           # NOT the literal string — this job's own script contains the words
           # "workflow_call", so a content grep would self-match self-test.yml.
-          EXTRA="$(grep -lE '^  workflow_call:' .github/workflows/*.yml | xargs -n1 basename | grep -vxF -e dockerfile-build-and-push.yml -e static-publish-to-s3.yml -e ecs-deploy.yml || true)"
+          EXTRA="$(grep -lE '^  workflow_call:' .github/workflows/*.yml | xargs -n1 basename | grep -vxF -e dockerfile-build-and-push.yml -e static-publish-to-s3.yml -e ecs-deploy.yml -e vultr-deploy.yml || true)"
           [ -z "$EXTRA" ] || { echo "::error::unexpected extra workflow_call reusable: $EXTRA (breaks gha-deployer job_workflow_ref allowlist)"; exit 1; }
 
   negative-oidc-deployer-from-actions:
