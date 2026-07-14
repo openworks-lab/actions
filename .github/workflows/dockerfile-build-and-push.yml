@@ -29,6 +29,10 @@ on:
       aws-region:
         type: string
         default: ap-northeast-2
+      ref:
+        description: "Optional git ref (release tag 등) to build from — 빈 값 = run sha (기존 동작)"
+        type: string
+        default: ""
     outputs:
       image-uri:
         value: ${{ jobs.build.outputs.image-uri }}
@@ -48,6 +52,8 @@ jobs:
       image-digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Derive + validate identity (acceptance gate, M3)
         id: id
@@ -64,12 +70,16 @@ jobs:
           [[ "$PROJECT" =~ $RE ]] || { echo "::error::project slug '$PROJECT' fails $RE"; exit 1; }
           [[ "$SVC" =~ $RE ]] || { echo "::error::service slug '$SVC' fails $RE"; exit 1; }
           REPO="${ENV}-${PROJECT}/${SVC}"
+          # 이미지 태그 SHA = checked-out HEAD (ref 입력 시 그 ref 의 커밋).
+          # 기본 경로(ref="")에서는 HEAD == GITHUB_SHA — 기존 태그와 동일.
+          # 릴리스 태그는 main 위 커밋을 가리키므로 main-<sha> 라벨 의미는 유지된다.
+          SHA="$(git rev-parse HEAD)"
           REG="${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ inputs.aws-region }}.amazonaws.com"
           {
             echo "repo=${REPO}"
-            echo "image-uri=${REG}/${REPO}:main-${GITHUB_SHA}"
+            echo "image-uri=${REG}/${REPO}:main-${SHA}"
             echo "tags<<EOTAGS"
-            echo "${REG}/${REPO}:main-${GITHUB_SHA}"
+            echo "${REG}/${REPO}:main-${SHA}"
             echo "${REG}/${REPO}:latest"
             echo "EOTAGS"
           } >> "$GITHUB_OUTPUT"
