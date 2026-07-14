@@ -38,7 +38,8 @@ on:
         description: "s3://bucket/prefix synced to (empty on publish:false build-only path)"
         value: ${{ jobs.publish.outputs.s3-uri }}
       commit-sha:
-        value: ${{ github.sha }}
+        description: "Checked-out HEAD actually built (follows ref input; == run sha when ref unset)"
+        value: ${{ jobs.publish.outputs.commit-sha }}
 
 permissions:
   id-token: write
@@ -49,10 +50,15 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       s3-uri: ${{ steps.sync.outputs.s3-uri }}
+      commit-sha: ${{ steps.sha.outputs.sha }}
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref }}
+
+      - name: Resolve built commit (follows ref input)
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Validate env + bucket scope (M9 — fail-fast)
         env:
