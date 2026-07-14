@@ -29,6 +29,10 @@ on:
       publish:
         type: boolean
         default: false
+      ref:
+        description: "Optional git ref (release tag 등) to build from — 빈 값 = run sha (기존 동작)"
+        type: string
+        default: ""
     outputs:
       s3-uri:
         description: "s3://bucket/prefix synced to (empty on publish:false build-only path)"
@@ -47,6 +51,8 @@ jobs:
       s3-uri: ${{ steps.sync.outputs.s3-uri }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Validate env + bucket scope (M9 — fail-fast)
         env:
