@@ -26,6 +26,10 @@ on:
       push:
         type: boolean
         default: false
+      push_latest:
+        description: "가변 :latest 태그도 함께 emit. prod 는 false 권장 (불변 main-<sha> 만)."
+        type: boolean
+        default: true
       aws-region:
         type: string
         default: ap-northeast-2
@@ -60,6 +64,7 @@ jobs:
         env:
           ENV: ${{ inputs.env }}
           SVC: ${{ inputs.service_slug }}
+          PUSH_LATEST: ${{ inputs.push_latest }}
         run: |
           set -euo pipefail
           OWNER="${GITHUB_REPOSITORY%%/*}"
@@ -75,12 +80,15 @@ jobs:
           # 릴리스 태그는 main 위 커밋을 가리키므로 main-<sha> 라벨 의미는 유지된다.
           SHA="$(git rev-parse HEAD)"
           REG="${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ inputs.aws-region }}.amazonaws.com"
+          # main-<sha> 는 불변(내용 주소) — 항상. :latest 는 가변 → prod 는 opt-out(역행 방지).
           {
             echo "repo=${REPO}"
             echo "image-uri=${REG}/${REPO}:main-${SHA}"
             echo "tags<<EOTAGS"
             echo "${REG}/${REPO}:main-${SHA}"
-            echo "${REG}/${REPO}:latest"
+            if [ "$PUSH_LATEST" = "true" ]; then
+              echo "${REG}/${REPO}:latest"
+            fi
             echo "EOTAGS"
           } >> "$GITHUB_OUTPUT"
 

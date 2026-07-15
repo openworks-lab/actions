@@ -17,6 +17,18 @@ jobs:
       context: selftest
       push: false
 
+  # prod opt-out 경로(push_latest:false) 스모크 — 조건부 태그 블록이 set -euo pipefail 하에서
+  # 안 깨지는지 러너가 증명. push:false 라 ECR 미도달 → 태그 부재는 조건문 단순성에 의존.
+  build-only-docker-no-latest:
+    uses: ./.github/workflows/dockerfile-build-and-push.yml
+    with:
+      env: dev
+      service_slug: selftest-dummy
+      dockerfile: selftest/Dockerfile
+      context: selftest
+      push: false
+      push_latest: false
+
   build-only-static:
     uses: ./.github/workflows/static-publish-to-s3.yml
     with:
@@ -86,12 +98,12 @@ jobs:
     name: selftest-gate
     runs-on: ubuntu-latest
     if: always()
-    needs: [build-only-docker, build-only-static, ecs-transform-unit, workflow-ref-match, negative-oidc-deployer-from-actions]
+    needs: [build-only-docker, build-only-docker-no-latest, build-only-static, ecs-transform-unit, workflow-ref-match, negative-oidc-deployer-from-actions]
     steps:
       - name: Aggregate result (M15 — single stable required context)
         run: |
           set -euo pipefail
-          R='${{ needs.build-only-docker.result }} ${{ needs.build-only-static.result }} ${{ needs.ecs-transform-unit.result }} ${{ needs.workflow-ref-match.result }} ${{ needs.negative-oidc-deployer-from-actions.result }}'
+          R='${{ needs.build-only-docker.result }} ${{ needs.build-only-docker-no-latest.result }} ${{ needs.build-only-static.result }} ${{ needs.ecs-transform-unit.result }} ${{ needs.workflow-ref-match.result }} ${{ needs.negative-oidc-deployer-from-actions.result }}'
           echo "results: $R"
           for x in $R; do
             case "$x" in success|skipped) : ;; *) echo "::error::a self-test job is '$x'"; exit 1 ;; esac
