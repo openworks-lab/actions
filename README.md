@@ -12,6 +12,11 @@ inside the reusable. Security/tooling upgrades happen here once.
 | `static-publish-to-s3.yml` | Build an SPA, sync to `openworks-<env>-*` S3 | `env`, `s3-bucket` |
 | `ecs-deploy.yml` | Drift-safe image swap on an ECS service | `env`, `service_slug`, `cluster`, `service`, `image` |
 
+`dockerfile-build-and-push.yml` pushes `main-<sha>` (immutable) + `:latest`
+(mutable). Set `push_latest: false` on **prod** callers to emit only the
+immutable tag — a re-supplied old build can otherwise move `:latest` backward.
+Deploy always by the explicit `main-<sha>` URI, never `:latest`.
+
 ## Trust model
 
 These assume `arn:aws:iam::211125308791:role/<env>-gha-deployer` via OIDC.
