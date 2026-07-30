@@ -37,6 +37,13 @@ on:
         description: "Optional git ref (release tag 등) to build from — 빈 값 = run sha (기존 동작)"
         type: string
         default: ""
+      cache_mode:
+        description: >-
+          GHA 빌드 캐시 export 범위. max = 모든 중간 레이어(기존 동작),
+          min = 최종 이미지 레이어만. 캐시 export 가 실제 빌드보다 오래 걸리는
+          서비스는 min 을 넘긴다. 기본값은 기존 동작을 유지한다.
+        type: string
+        default: "max"
     outputs:
       image-uri:
         value: ${{ jobs.build.outputs.image-uri }}
@@ -65,12 +72,15 @@ jobs:
           ENV: ${{ inputs.env }}
           SVC: ${{ inputs.service_slug }}
           PUSH_LATEST: ${{ inputs.push_latest }}
+          CACHE_MODE: ${{ inputs.cache_mode }}
         run: |
           set -euo pipefail
           OWNER="${GITHUB_REPOSITORY%%/*}"
           PROJECT="${GITHUB_REPOSITORY#*/}"
           [ "$OWNER" = "openworks-lab" ] || { echo "::error::owner '$OWNER' != openworks-lab"; exit 1; }
           case "$ENV" in dev|prod) : ;; *) echo "::error::env must be dev|prod"; exit 1 ;; esac
+          # cache_mode 는 buildx 인자 문자열에 그대로 보간되므로 allowlist 로 막는다.
+          case "$CACHE_MODE" in max|min) : ;; *) echo "::error::cache_mode must be max|min"; exit 1 ;; esac
           RE='^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$'
           [[ "$PROJECT" =~ $RE ]] || { echo "::error::project slug '$PROJECT' fails $RE"; exit 1; }
           [[ "$SVC" =~ $RE ]] || { echo "::error::service slug '$SVC' fails $RE"; exit 1; }
@@ -127,4 +137,4 @@ jobs:
           push: ${{ inputs.push }}
           tags: ${{ steps.id.outputs.tags }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=${{ inputs.cache_mode }}
