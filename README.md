@@ -17,6 +17,18 @@ inside the reusable. Security/tooling upgrades happen here once.
 immutable tag — a re-supplied old build can otherwise move `:latest` backward.
 Deploy always by the explicit `main-<sha>` URI, never `:latest`.
 
+## HTML 재검증 선택 적용
+
+`static-publish-to-s3.yml`의 `revalidate-html: true`는 `.html` 파일에만
+`Cache-Control: no-cache, max-age=0, must-revalidate`를 적용한다. 기본값은 `false`다.
+일반 파일을 먼저 동기화한 뒤 HTML을 동기화·재업로드한다. 내용이 같은 HTML도
+메타데이터가 갱신되며, 삭제된 HTML도 기존 `--delete` 계약대로 제거된다.
+JS·CSS·이미지의 캐시 정책은 변경하지 않는다. `publish: false`는 업로드하지 않는다.
+
+호출 저장소는 DEV에서 S3와 공개 URL의 응답 헤더, 동일 브라우저 프로필의 새 탭,
+화면 이동을 확인한 뒤 PROD에 배포한다. 이미 열린 페이지나 기존 브라우저 캐시를
+원격으로 교체하는 기능은 아니다. 공용 workflow를 먼저 병합한 뒤 호출부 옵션을 병합한다.
+
 ## Trust model
 
 These assume `arn:aws:iam::211125308791:role/<env>-gha-deployer` via OIDC.

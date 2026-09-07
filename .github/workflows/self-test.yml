@@ -44,6 +44,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: bash tests/transform_test.sh
+      - run: ruby tests/static_publish_test.rb
 
   workflow-ref-match:
     name: "trusted job_workflow_ref == actual reusables (M13)"

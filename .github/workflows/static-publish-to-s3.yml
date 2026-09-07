@@ -29,6 +29,10 @@ on:
       publish:
         type: boolean
         default: false
+      revalidate-html:
+        description: "HTML에만 재검증 정책을 적용한다. 기본값은 기존 업로드 동작을 유지한다."
+        type: boolean
+        default: false
       ref:
         description: "Optional git ref (release tag 등) to build from — 빈 값 = run sha (기존 동작)"
         type: string
@@ -97,9 +101,18 @@ jobs:
           BUCKET: ${{ inputs.s3-bucket }}
           PREFIX: ${{ inputs.s3-prefix }}
           OUTDIR: ${{ inputs.build-output-dir }}
+          REVALIDATE_HTML: ${{ inputs.revalidate-html }}
         run: |
           set -euo pipefail
           DEST="s3://${BUCKET}/${PREFIX}"
-          aws s3 sync "${OUTDIR}/" "${DEST}" --delete
+          if [ "$REVALIDATE_HTML" = "true" ]; then
+            POLICY='no-cache, max-age=0, must-revalidate'
+            aws s3 sync "${OUTDIR}/" "${DEST}" --delete --exclude '*.html'
+            aws s3 sync "${OUTDIR}/" "${DEST}" --delete --exclude '*' --include '*.html' --cache-control "$POLICY"
+            # sync가 건너뛴 동일 내용 HTML에도 기존 캐시 메타데이터를 교정한다.
+            aws s3 cp "${OUTDIR}/" "${DEST}" --recursive --exclude '*' --include '*.html' --cache-control "$POLICY"
+          else
+            aws s3 sync "${OUTDIR}/" "${DEST}" --delete
+          fi
           echo "s3-uri=${DEST}" >> "$GITHUB_OUTPUT"
       # NOTE: CloudFront invalidation intentionally NOT in V1.0 (M10, ADR-0006).
